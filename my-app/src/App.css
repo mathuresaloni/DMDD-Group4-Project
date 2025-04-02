@@ -1,0 +1,243 @@
+/* Reset and Global Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: "Roboto", sans-serif;
+}
+
+body {
+  background-color: #f1f9f4; /* Soft light background */
+  font-size: 1rem;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  padding: 20px;
+  color: #333;
+}
+
+.container {
+  width: 100%;
+  max-width: 1200px;
+  margin: auto;
+  padding: 40px;
+  background: #fff;
+  border-radius: 20px;
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.1);
+}
+
+.header-title {
+  text-align: center;
+  font-size: 3rem;
+  font-weight: 600;
+  color: #2d6a4f; /* Deep green for the header */
+  margin-bottom: 30px;
+}
+
+.form-container,
+.patients-container,
+.appointments-container,
+.rooms-container,
+.booked-rooms-container {
+  background: #f7faf9; /* Light gray background for each section */
+  padding: 35px;
+  border-radius: 15px;
+  box-shadow: 0 15px 30px rgba(0, 0, 0, 0.08);
+  margin-bottom: 30px;
+}
+
+.form-title,
+.section-title {
+  font-size: 1.8rem;
+  font-weight: 500;
+  color: #2d6a4f;
+  margin-bottom: 25px;
+}
+
+.patient-form input,
+.patient-form select,
+.patient-form button {
+  width: 100%;
+  padding: 16px;
+  margin: 12px 0;
+  border-radius: 10px;
+  border: 2px solid #ddd;
+  font-size: 1.1rem;
+  transition: all 0.3s ease;
+}
+
+.patient-form input:focus,
+.patient-form select:focus {
+  border-color: #2d6a4f; /* Focus color green */
+  outline: none;
+  box-shadow: 0 0 8px rgba(45, 106, 79, 0.3);
+}
+
+.patient-form button {
+  background-color: #2d6a4f; /* Deep green for buttons */
+  color: white;
+  border: none;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+  margin-top: 20px;
+  padding: 18px;
+  border-radius: 10px;
+}
+
+.patient-form button:hover {
+  background-color: #1b3b27; /* Darker green on hover */
+}
+
+.patients-list,
+.appointment-list,
+.rooms-list {
+  list-style-type: none;
+  padding: 0;
+}
+
+.patient-item,
+.appointment-item,
+.room-item {
+  background-color: #fff;
+  padding: 18px;
+  margin: 12px 0;
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+  font-size: 1.1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.patient-item:hover,
+.appointment-item:hover,
+.room-item:hover {
+  transform: translateY(-6px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.room-item {
+  background-color: #e3f9e5; /* Light green for available rooms */
+}
+
+.room-item.booked {
+  background-color: #ffebee; /* Light red for booked rooms */
+}
+
+.room-item span {
+  font-size: 1rem;
+  color: #333;
+}
+
+.room-item.booked span {
+  color: #d32f2f; /* Red color for booked rooms */
+}
+
+.room-item:hover {
+  background-color: #d1f2d3; /* Lighter green on hover */
+}
+
+.room-item.booked:hover {
+  background-color: #ffccd5; /* Light red on hover for booked rooms */
+}
+
+.input-group input,
+.input-group select {
+  font-size: 1.1rem;
+  padding: 16px;
+  margin: 10px 0;
+  border-radius: 12px;
+  border: 2px solid #ddd;
+  transition: all 0.3s ease;
+}
+
+.input-group input:focus,
+.input-group select:focus {
+  border-color: #2d6a4f; /* Focus color green */
+  box-shadow: 0 0 8px rgba(45, 106, 79, 0.3);
+}
+
+.input-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  justify-content: space-between;
+}
+
+.input-group input,
+.input-group select {
+  flex: 1 1 45%;
+  min-width: 250px;
+}
+
+@media (max-width: 768px) {
+  .input-group {
+    flex-direction: column;
+  }
+
+  .input-group input,
+  .input-group select {
+    flex: 1 1 100%;
+  }
+}
+
+.appointment-item span {
+  font-size: 1rem;
+  color: #333;
+}
+
+.appointment-item.booked {
+  background-color: #ffebee; /* Light red for booked appointments */
+}
+
+.appointment-item.booked span {
+  color: #d32f2f; /* Red color for booked appointments */
+}
+
+.appointment-item.booked:hover {
+  background-color: #ffccd5; /* Light red on hover for booked appointments */
+}
+
+/* Styling for appointment input groups if applicable */
+.appointment-input-group input,
+.appointment-input-group select {
+  font-size: 1.1rem;
+  padding: 16px;
+  margin: 10px 0;
+  border-radius: 12px;
+  border: 2px solid #ddd;
+  transition: all 0.3s ease;
+}
+
+.appointment-input-group input:focus,
+.appointment-input-group select:focus {
+  border-color: #2d6a4f; /* Focus color green */
+  box-shadow: 0 0 8px rgba(45, 106, 79, 0.3);
+}
+
+.appointment-input-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 15px;
+  justify-content: space-between;
+}
+
+.appointment-input-group input,
+.appointment-input-group select {
+  flex: 1 1 45%;
+  min-width: 250px;
+}
+
+@media (max-width: 768px) {
+  .appointment-input-group {
+    flex-direction: column;
+  }
+
+  .appointment-input-group input,
+  .appointment-input-group select {
+    flex: 1 1 100%;
+  }
+}
