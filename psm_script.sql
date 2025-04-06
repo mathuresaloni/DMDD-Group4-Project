@@ -6,6 +6,10 @@ GO
 -- Create Stored Procedures
 -- =============================
 
+IF OBJECT_ID('sp_AdmitPatient', 'P') IS NOT NULL
+    DROP PROCEDURE sp_AdmitPatient;
+GO
+
 CREATE PROCEDURE sp_AdmitPatient
     @PatientID INT,
     @RoomID INT,
@@ -14,85 +18,127 @@ CREATE PROCEDURE sp_AdmitPatient
     @Message NVARCHAR(255) OUTPUT
 AS
 BEGIN
-    IF EXISTS (SELECT 1 FROM Room WHERE RoomID = @RoomID AND Status = 'Available')
-    BEGIN
-        INSERT INTO Inpatient (PatientID, PatientType, RoomID, DoctorID, AdmissionDate)
-        VALUES (@PatientID, 'Inpatient', @RoomID, @DoctorID, @AdmissionDate);
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
-        UPDATE Room SET Status = 'Occupied' WHERE RoomID = @RoomID;
+        IF EXISTS (SELECT 1 FROM Room WHERE RoomID = @RoomID AND Status = 'Available')
+        BEGIN
+            INSERT INTO Inpatient (PatientID, PatientType, RoomID, DoctorID, AdmissionDate)
+            VALUES (@PatientID, 'Inpatient', @RoomID, @DoctorID, @AdmissionDate);
 
-        SET @Message = 'Patient admitted successfully.';
-    END
-    ELSE
-    BEGIN
-        SET @Message = 'Room is not available for admission.';
-    END
+            UPDATE Room SET Status = 'Occupied' WHERE RoomID = @RoomID;
+
+            SET @Message = 'Patient admitted successfully.';
+            COMMIT TRANSACTION;
+        END
+        ELSE
+        BEGIN
+            SET @Message = 'Room is not available.';
+            ROLLBACK TRANSACTION;
+        END
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        SET @Message = 'Error during admission: ' + ERROR_MESSAGE();
+    END CATCH
 END;
-
 GO
+
+IF OBJECT_ID('sp_GetDoctorAppointments', 'P') IS NOT NULL
+    DROP PROCEDURE sp_GetDoctorAppointments;
+GO
+
 CREATE PROCEDURE sp_GetDoctorAppointments
     @DoctorID INT,
-    @TotalAppointments INT OUTPUT
+    @Status VARCHAR(50),
+    @AppointmentCount INT OUTPUT
 AS
 BEGIN
-    SELECT A.AppointmentID, P.Name AS PatientName, A.Date, A.AppointmentTime, A.Reason, A.Status
-    FROM Appointment A
-    JOIN Patient P ON A.PatientID = P.PatientID
-    WHERE A.DoctorID = @DoctorID
-    ORDER BY A.Date, A.AppointmentTime;
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
-    -- Set output count
-    SELECT @TotalAppointments = COUNT(*) 
-    FROM Appointment 
-    WHERE DoctorID = @DoctorID;
+        SELECT 
+            AppointmentID, PatientID, Date, AppointmentTime, Reason, Status
+        FROM 
+            Appointment
+        WHERE 
+            DoctorID = @DoctorID AND Status = @Status;
+
+        SELECT @AppointmentCount = COUNT(*)
+        FROM Appointment
+        WHERE DoctorID = @DoctorID AND Status = @Status;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        SET @AppointmentCount = -1;
+    END CATCH
 END;
-
-
-
 GO
+
+
+IF OBJECT_ID('sp_DischargePatient', 'P') IS NOT NULL
+    DROP PROCEDURE sp_DischargePatient;
+GO
+
 CREATE PROCEDURE sp_DischargePatient
     @PatientID INT,
     @DischargeDate DATETIME,
-    @Success BIT OUTPUT
+    @Message NVARCHAR(255) OUTPUT
 AS
 BEGIN
-    DECLARE @RoomID INT;
+    BEGIN TRY
+        BEGIN TRANSACTION;
 
-    SELECT @RoomID = RoomID FROM Inpatient WHERE PatientID = @PatientID;
+        -- Check if patient exists in Inpatient table and not already discharged
+        IF EXISTS (SELECT 1 FROM Inpatient WHERE PatientID = @PatientID AND DischargeDate IS NULL)
+        BEGIN
+            
+            UPDATE Inpatient
+            SET DischargeDate = @DischargeDate
+            WHERE PatientID = @PatientID;
 
-    IF @RoomID IS NOT NULL
-    BEGIN
-        UPDATE Inpatient
-        SET DischargeDate = @DischargeDate
-        WHERE PatientID = @PatientID;
+            
+            DECLARE @RoomID INT;
+            SELECT @RoomID = RoomID FROM Inpatient WHERE PatientID = @PatientID;
 
-        UPDATE Room
-        SET Status = 'Available'
-        WHERE RoomID = @RoomID;
+           
+            UPDATE Room
+            SET Status = 'Available'
+            WHERE RoomID = @RoomID;
 
-        SET @Success = 1;
-    END
-    ELSE
-    BEGIN
-        SET @Success = 0;
-    END
+            SET @Message = 'Patient discharged successfully.';
+            COMMIT TRANSACTION;
+        END
+        ELSE
+        BEGIN
+            IF @@TRANCOUNT > 0
+                ROLLBACK TRANSACTION;
+
+            SET @Message = 'Patient not found or already discharged.';
+        END
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0
+            ROLLBACK TRANSACTION;
+
+        SET @Message = 'Error during discharge: ' + ERROR_MESSAGE();
+    END CATCH
 END;
-
+GO
 -- Stored Procedure sp_AdmitPatient test
 
-DECLARE @Message NVARCHAR(255);
+DECLARE @Msg NVARCHAR(255);
 
 EXEC sp_AdmitPatient
-    @PatientID = 20,
-    @RoomID = 1,
-    @DoctorID = 21,
-    @AdmissionDate = '2025-03-29',
-    @Message = @Message OUTPUT;
+    @PatientID = 11,     
+    @RoomID = 6,        
+    @DoctorID = 24,      
+    @AdmissionDate = '2025-03-30',
+    @Message = @Msg OUTPUT;
 
-PRINT @Message;
-
-SELECT * FROM Inpatient WHERE PatientID = 20;
-SELECT Status FROM Room WHERE RoomID = 1;
+SELECT @Msg AS ResultMessage;
 
 
 
@@ -100,27 +146,21 @@ SELECT Status FROM Room WHERE RoomID = 1;
 
 DECLARE @Count INT;
 
-EXEC sp_GetDoctorAppointments 
-    @DoctorID = 21, 
+EXEC sp_GetDoctorAppointments
+    @DoctorID = 21,
     @TotalAppointments = @Count OUTPUT;
 
-PRINT 'Total Appointments: ' + CAST(@Count AS VARCHAR);
-
-
+SELECT 'Total Appointments for DoctorID 21' AS Label, @Count AS Total;
 
 -- Stored Procedure sp_DischargePatient test
-DECLARE @Success BIT;
+DECLARE @Msg NVARCHAR(255);
 
-EXEC sp_DischargePatient
-    @PatientID = 1,
-    @DischargeDate = '2025-03-30',
-    @Success = @Success OUTPUT;
+EXEC sp_DischargePatient 
+    @PatientID = 4, 
+    @DischargeDate = '2025-03-30', 
+    @Message = @Msg OUTPUT;
 
-PRINT 'Discharge Success: ' + CAST(@Success AS VARCHAR);
-
-SELECT DischargeDate FROM Inpatient WHERE PatientID = 1;
-SELECT Status FROM Room WHERE RoomID = 1; 
-
+SELECT @Msg AS ResultMessage;
 
 -- ==============================
 -- Create User Defined Functions
