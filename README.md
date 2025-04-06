@@ -1,3 +1,3 @@
 # DMDD-Group4-Project
 
-#P5 GUI Implementation
+#Group 4 - PSM Implementation with GUI
