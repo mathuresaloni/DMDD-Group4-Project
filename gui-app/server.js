@@ -2,10 +2,14 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const sql = require("mssql");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 app.use(bodyParser.json());
 app.use(cors({ origin: "http://localhost:3000" }));
+
+// Serve static files from the images directory
+app.use("/images", express.static(path.join(__dirname, "public/images")));
 
 const dbConfig = {
   user: "sa",
@@ -205,6 +209,340 @@ app.get("/bookedrooms", async (req, res) => {
     );
     res.json(result.recordset);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Appointments API endpoints
+app.get("/appointments", async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT a.*, p.Name as PatientName, d.Name as DoctorName 
+      FROM Appointment a
+      JOIN Patient p ON a.PatientID = p.PatientID
+      JOIN Doctor d ON a.DoctorID = d.EmployeeID
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching appointments:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/appointments", async (req, res) => {
+  const { PatientID, DoctorID, Date, AppointmentTime, Reason, Status } =
+    req.body;
+  try {
+    await sql.query(`
+      INSERT INTO Appointment (PatientID, DoctorID, Date, AppointmentTime, Reason, Status)
+      VALUES (${PatientID}, ${DoctorID}, '${Date}', '${AppointmentTime}', '${Reason}', '${Status}')
+    `);
+    res.json({ message: "Appointment created successfully" });
+  } catch (err) {
+    console.error("Error creating appointment:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/appointments/:id/status", async (req, res) => {
+  const { id } = req.params;
+  const { Status } = req.body;
+  try {
+    await sql.query(`
+      UPDATE Appointment 
+      SET Status = '${Status}'
+      WHERE AppointmentID = ${id}
+    `);
+    res.json({ message: "Appointment status updated successfully" });
+  } catch (err) {
+    console.error("Error updating appointment status:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pharmacy / Medications API endpoints
+app.get("/medications", async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT m.*, man.Name as ManufacturerName
+      FROM Medication m
+      JOIN Manufacturer man ON m.ManufacturerID = man.ManufacturerID
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching medications:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/inventory", async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT i.*, m.Name as MedicationName, m.ExpiryDate
+      FROM Inventory i
+      JOIN Medication m ON i.MedicationID = m.MedicationID
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching inventory:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/manufacturers", async (req, res) => {
+  try {
+    const result = await sql.query(`SELECT * FROM Manufacturer`);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching manufacturers:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/pharmacies", async (req, res) => {
+  try {
+    const result = await sql.query(`SELECT * FROM Pharmacy`);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching pharmacies:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/medications", async (req, res) => {
+  const {
+    Name,
+    Description,
+    Price,
+    ExpiryDate,
+    PharmacyID,
+    ManufacturerID,
+    Quantity,
+  } = req.body;
+
+  try {
+    // Start a transaction
+    const transaction = new sql.Transaction();
+    await transaction.begin();
+
+    try {
+      // Insert into Medication table
+      const medResult = await transaction
+        .request()
+        .input("Name", sql.VarChar, Name)
+        .input("Description", sql.Text, Description || "")
+        .input("Price", sql.Decimal(10, 2), Price)
+        .input("ExpiryDate", sql.Date, ExpiryDate)
+        .input("PharmacyID", sql.Int, PharmacyID)
+        .input("ManufacturerID", sql.Int, ManufacturerID).query(`
+          INSERT INTO Medication (PharmacyID, ManufacturerID, Name, Description, Price, ExpiryDate)
+          OUTPUT INSERTED.MedicationID
+          VALUES (@PharmacyID, @ManufacturerID, @Name, @Description, @Price, @ExpiryDate)
+        `);
+
+      const medicationID = medResult.recordset[0].MedicationID;
+
+      // Insert into Inventory table
+      await transaction
+        .request()
+        .input("PharmacyID", sql.Int, PharmacyID)
+        .input("MedicationID", sql.Int, medicationID)
+        .input("Quantity", sql.Int, Quantity).query(`
+          INSERT INTO Inventory (PharmacyID, MedicationID, Quantity, LastUpdated)
+          VALUES (@PharmacyID, @MedicationID, @Quantity, GETDATE())
+        `);
+
+      // Commit the transaction
+      await transaction.commit();
+
+      res.json({
+        message: "Medication added successfully",
+        medicationID,
+      });
+    } catch (err) {
+      // Rollback in case of error
+      await transaction.rollback();
+      throw err;
+    }
+  } catch (err) {
+    console.error("Error adding medication:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/inventory/:id", async (req, res) => {
+  const { id } = req.params;
+  const { quantity, expiryDate } = req.body;
+
+  try {
+    // Start a transaction
+    const transaction = new sql.Transaction();
+    await transaction.begin();
+
+    try {
+      // Update inventory quantity
+      await transaction
+        .request()
+        .input("InventoryID", sql.Int, id)
+        .input("Quantity", sql.Int, quantity).query(`
+          UPDATE Inventory
+          SET Quantity = @Quantity, LastUpdated = GETDATE()
+          WHERE InventoryID = @InventoryID
+        `);
+
+      // Update expiry date if provided
+      if (expiryDate) {
+        // Get the medication ID first
+        const medResult = await transaction
+          .request()
+          .input("InventoryID", sql.Int, id).query(`
+            SELECT MedicationID FROM Inventory WHERE InventoryID = @InventoryID
+          `);
+
+        const medicationID = medResult.recordset[0].MedicationID;
+
+        // Update the expiry date
+        await transaction
+          .request()
+          .input("MedicationID", sql.Int, medicationID)
+          .input("ExpiryDate", sql.Date, expiryDate).query(`
+            UPDATE Medication
+            SET ExpiryDate = @ExpiryDate
+            WHERE MedicationID = @MedicationID
+          `);
+      }
+
+      // Commit the transaction
+      await transaction.commit();
+
+      res.json({
+        message: "Inventory updated successfully",
+      });
+    } catch (err) {
+      // Rollback in case of error
+      await transaction.rollback();
+      throw err;
+    }
+  } catch (err) {
+    console.error("Error updating inventory:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/medications/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Start a transaction
+    const transaction = new sql.Transaction();
+    await transaction.begin();
+
+    try {
+      // First delete from Inventory
+      await transaction.request().input("MedicationID", sql.Int, id).query(`
+          DELETE FROM Inventory WHERE MedicationID = @MedicationID
+        `);
+
+      // Then delete from Medication
+      await transaction.request().input("MedicationID", sql.Int, id).query(`
+          DELETE FROM Medication WHERE MedicationID = @MedicationID
+        `);
+
+      // Commit the transaction
+      await transaction.commit();
+
+      res.json({
+        message: "Medication deleted successfully",
+      });
+    } catch (err) {
+      // Rollback in case of error
+      await transaction.rollback();
+      throw err;
+    }
+  } catch (err) {
+    console.error("Error deleting medication:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Billing API endpoints
+app.get("/billing", async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT b.*, p.Name as PatientName
+      FROM Billing b
+      JOIN Patient p ON b.PatientID = p.PatientID
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching billing records:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/billing", async (req, res) => {
+  const {
+    PatientID,
+    PaymentMethodID,
+    ServiceCharges,
+    MedicationCharges,
+    RoomCharges,
+    ConsultationFee,
+    TotalAmount,
+    AmountPaid,
+    Status,
+  } = req.body;
+
+  try {
+    const result = await sql.query(`
+      INSERT INTO Billing (
+        PatientID, 
+        PaymentMethodID, 
+        ServiceCharges, 
+        MedicationCharges, 
+        RoomCharges,
+        ConsultationFee,
+        TotalAmount,
+        AmountPaid
+      )
+      OUTPUT INSERTED.BillingID
+      VALUES (
+        ${PatientID}, 
+        ${PaymentMethodID}, 
+        ${ServiceCharges}, 
+        ${MedicationCharges}, 
+        ${RoomCharges},
+        ${ConsultationFee},
+        ${TotalAmount},
+        ${AmountPaid}
+      )
+    `);
+
+    const billingID = result.recordset[0].BillingID;
+
+    res.json({
+      message: "Billing record created successfully",
+      billingID,
+    });
+  } catch (err) {
+    console.error("Error creating billing record:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/billing/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    await sql.query(`
+      DELETE FROM Billing WHERE BillingID = ${id}
+    `);
+
+    res.json({
+      message: "Billing record deleted successfully",
+    });
+  } catch (err) {
+    console.error("Error deleting billing record:", err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -4,11 +4,13 @@ import "./index.css";
 import App from "./App";
 import reportWebVitals from "./reportWebVitals";
 import PatientRoom from "./PatientRoom";
+import Dashboard from "./Dashboard";
 
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <React.StrictMode>
-    <PatientRoom />
+    {/* <PatientRoom /> */}
+    <Dashboard />
   </React.StrictMode>
 );
 
