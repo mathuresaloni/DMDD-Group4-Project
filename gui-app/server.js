@@ -13,7 +13,7 @@ app.use("/images", express.static(path.join(__dirname, "public/images")));
 
 const dbConfig = {
   user: "sa",
-  password: "YourSTRONGPassword123",
+  password: "MyNewPassword123",
   server: "localhost",
   database: "HospitalDB",
   options: {
@@ -25,16 +25,6 @@ const dbConfig = {
 sql.connect(dbConfig, (err) => {
   if (err) console.error("Database connection failed", err);
   else console.log("SQL Server Connected");
-});
-
-// CRUD Operations for Patients
-app.get("/patients", async (req, res) => {
-  try {
-    const result = await sql.query("SELECT * FROM Patient");
-    res.json(result.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // Fetch all appointments along with patient and doctor details
@@ -59,6 +49,195 @@ app.get("/doctors", async (req, res) => {
   }
 });
 
+// Dashboard statistics endpoint that combines all counts
+app.get("/api/dashboard-stats", async (req, res) => {
+  try {
+    // Create a new SQL connection pool request
+    const request = new sql.Request();
+    
+    // Get count of currently admitted patients (Inpatients without discharge date)
+    const patientResult = await request.query(`
+      SELECT COUNT(*) AS admittedPatients 
+      FROM Inpatient 
+      WHERE DischargeDate IS NULL
+    `);
+    
+    // Get count of available rooms
+    const roomResult = await request.query(`
+      SELECT COUNT(*) AS availableRooms 
+      FROM Room 
+      WHERE Status = 'Available'
+    `);
+    
+    // Get count of today's appointments
+    const appointmentResult = await request.query(`
+      SELECT COUNT(*) AS todayAppointments 
+      FROM Appointment 
+      WHERE CONVERT(date, Date) = CONVERT(date, GETDATE())
+    `);
+    
+    // Get total count of medication items in stock across all pharmacies
+    const pharmacyResult = await request.query(`
+      SELECT SUM(Quantity) AS stockItems 
+      FROM Inventory
+    `);
+    
+    // Combine all stats into one response object
+    const dashboardStats = {
+      admittedPatients: patientResult.recordset[0].admittedPatients || 0,
+      availableRooms: roomResult.recordset[0].availableRooms || 0,
+      todayAppointments: appointmentResult.recordset[0].todayAppointments || 0,
+      stockItems: pharmacyResult.recordset[0].stockItems || 0
+    };
+    
+    res.json(dashboardStats);
+  } catch (err) {
+    console.error("Error fetching dashboard statistics:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add these improved endpoints to your server.js file
+
+// Get all inpatients with complete information including room details
+app.get("/inpatients", async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT i.*, p.Name, p.Age, p.Gender, p.PhoneNumber, p.Email, p.Address, p.EmergencyContact,
+             r.RoomID, r.RoomType, r.CostPerDay, r.FloorNumber, r.Capacity, r.Status AS RoomStatus
+      FROM Inpatient i
+      JOIN Patient p ON i.PatientID = p.PatientID
+      LEFT JOIN Room r ON i.RoomID = r.RoomID
+      WHERE i.DischargeDate IS NULL
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching inpatients:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get all outpatients with complete information
+app.get("/outpatients", async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT o.*, p.Name, p.Age, p.Gender, p.PhoneNumber, p.Email, p.Address, p.EmergencyContact,
+             CONVERT(VARCHAR(10), o.VisitDate, 120) AS FormattedVisitDate
+      FROM Outpatient o
+      JOIN Patient p ON o.PatientID = p.PatientID
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching outpatients:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get combined patient information with correct type data
+app.get("/patients", async (req, res) => {
+  try {
+    // First get all patients
+    const baseResult = await sql.query(`
+      SELECT * FROM Patient 
+    `);
+    
+    // Get all inpatients with room info
+    const inpatientResult = await sql.query(`
+      SELECT i.PatientID, i.RoomID, i.DoctorID, i.AdmissionDate, i.DischargeDate,
+             r.RoomType, r.FloorNumber, r.CostPerDay
+      FROM Inpatient i
+      LEFT JOIN Room r ON i.RoomID = r.RoomID
+      WHERE i.DischargeDate IS NULL
+    `);
+    
+    // Get all outpatients with visit info
+    const outpatientResult = await sql.query(`
+      SELECT o.PatientID, o.VisitDate, o.ConsultationFee,
+             CONVERT(VARCHAR(10), o.VisitDate, 120) AS FormattedVisitDate 
+      FROM Outpatient o
+    `);
+    
+    // Create lookup maps
+    const inpatientMap = new Map();
+    inpatientResult.recordset.forEach(record => {
+      inpatientMap.set(record.PatientID, record);
+    });
+    
+    const outpatientMap = new Map();
+    outpatientResult.recordset.forEach(record => {
+      outpatientMap.set(record.PatientID, record);
+    });
+    
+    // Combine all data
+    const enhancedPatients = baseResult.recordset.map(patient => {
+      const result = { ...patient };
+      
+      if (patient.PatientType === 'Inpatient') {
+        const inpatientData = inpatientMap.get(patient.PatientID);
+        if (inpatientData) {
+          Object.assign(result, inpatientData);
+        }
+      } else if (patient.PatientType === 'Outpatient') {
+        const outpatientData = outpatientMap.get(patient.PatientID);
+        if (outpatientData) {
+          Object.assign(result, outpatientData);
+        }
+      }
+      
+      return result;
+    });
+    
+    res.json(enhancedPatients);
+  } catch (err) {
+    console.error("Error fetching enhanced patients:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get detailed patient information by ID
+app.get("/patients/:id", async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    // Get basic patient info
+    const patientResult = await sql.query(`
+      SELECT * FROM Patient WHERE PatientID = ${id}
+    `);
+    
+    if (patientResult.recordset.length === 0) {
+      return res.status(404).json({ error: "Patient not found" });
+    }
+    
+    const patient = patientResult.recordset[0];
+    
+    // Get additional info based on patient type
+    if (patient.PatientType === "Inpatient") {
+      const inpatientResult = await sql.query(`
+        SELECT * FROM Inpatient WHERE PatientID = ${id}
+      `);
+      
+      if (inpatientResult.recordset.length > 0) {
+        // Merge inpatient details
+        Object.assign(patient, inpatientResult.recordset[0]);
+      }
+    } else if (patient.PatientType === "Outpatient") {
+      const outpatientResult = await sql.query(`
+        SELECT * FROM Outpatient WHERE PatientID = ${id}
+      `);
+      
+      if (outpatientResult.recordset.length > 0) {
+        // Merge outpatient details
+        Object.assign(patient, outpatientResult.recordset[0]);
+      }
+    }
+    
+    res.json(patient);
+  } catch (err) {
+    console.error(`Error fetching patient ${id}:`, err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post("/patients", async (req, res) => {
   const { Name, PhoneNumber, Gender, Age, PatientType } = req.body;
   try {
@@ -71,15 +250,155 @@ app.post("/patients", async (req, res) => {
   }
 });
 
+// Add this endpoint to your server.js file
+
+// Update patient endpoint
 app.put("/patients/:id", async (req, res) => {
   const { id } = req.params;
-  const { Name, PhoneNumber, Gender, Age } = req.body;
+  const {
+    Name,
+    PhoneNumber,
+    Gender,
+    Email,
+    Age,
+    Address,
+    EmergencyContact,
+    PatientType,
+    RoomID,
+    DoctorID,
+    VisitDate,
+    ConsultationFee
+  } = req.body;
+
+  console.log(`Received update request for patient ID: ${id}`, req.body);
+
   try {
-    await sql.query(
-      `UPDATE Patient SET Name='${Name}', PhoneNumber='${PhoneNumber}', Gender='${Gender}', Age=${Age} WHERE PatientID=${id}`
-    );
-    res.json({ message: "Patient updated successfully" });
+    // Start a transaction
+    const transaction = new sql.Transaction();
+    await transaction.begin();
+
+    try {
+      // 1. Update the patient record
+      await transaction.request()
+        .input('PatientID', sql.Int, id)
+        .input('Name', sql.NVarChar, Name)
+        .input('PhoneNumber', sql.NVarChar, PhoneNumber)
+        .input('Gender', sql.NVarChar, Gender)
+        .input('Email', sql.NVarChar, Email || null)
+        .input('Age', sql.Int, Age)
+        .input('Address', sql.NVarChar, Address || null)
+        .input('EmergencyContact', sql.NVarChar, EmergencyContact || null)
+        .query(`
+          UPDATE Patient
+          SET Name = @Name,
+              PhoneNumber = @PhoneNumber,
+              Gender = @Gender,
+              Email = @Email,
+              Age = @Age,
+              Address = @Address,
+              EmergencyContact = @EmergencyContact
+          WHERE PatientID = @PatientID
+        `);
+
+      // 2. If inpatient, update inpatient record
+      if (PatientType === "Inpatient" && RoomID) {
+        // Check if inpatient record exists
+        const inpatientCheck = await transaction.request()
+          .input('PatientID', sql.Int, id)
+          .query(`
+            SELECT COUNT(*) AS count
+            FROM Inpatient
+            WHERE PatientID = @PatientID
+          `);
+
+        if (inpatientCheck.recordset[0].count > 0) {
+          // Update inpatient record
+          await transaction.request()
+            .input('PatientID', sql.Int, id)
+            .input('RoomID', sql.Int, RoomID)
+            .input('DoctorID', sql.Int, DoctorID)
+            .query(`
+              UPDATE Inpatient
+              SET RoomID = @RoomID,
+                  DoctorID = @DoctorID
+              WHERE PatientID = @PatientID
+            `);
+
+          // Update room status if changed
+          if (RoomID) {
+            // Get previous room ID
+            const prevRoomResult = await transaction.request()
+              .input('PatientID', sql.Int, id)
+              .query(`
+                SELECT RoomID
+                FROM Inpatient
+                WHERE PatientID = @PatientID
+              `);
+
+            const prevRoomID = prevRoomResult.recordset[0]?.RoomID;
+
+            // If room changed, update statuses
+            if (prevRoomID && prevRoomID !== RoomID) {
+              // Set previous room to Available
+              await transaction.request()
+                .input('RoomID', sql.Int, prevRoomID)
+                .query(`
+                  UPDATE Room
+                  SET Status = 'Available'
+                  WHERE RoomID = @RoomID
+                `);
+
+              // Set new room to Occupied
+              await transaction.request()
+                .input('RoomID', sql.Int, RoomID)
+                .query(`
+                  UPDATE Room
+                  SET Status = 'Occupied'
+                  WHERE RoomID = @RoomID
+                `);
+            }
+          }
+        }
+      }
+
+      // 3. If outpatient, update outpatient record
+      if (PatientType === "Outpatient") {
+        // Check if outpatient record exists
+        const outpatientCheck = await transaction.request()
+          .input('PatientID', sql.Int, id)
+          .query(`
+            SELECT COUNT(*) AS count
+            FROM Outpatient
+            WHERE PatientID = @PatientID
+          `);
+
+        if (outpatientCheck.recordset[0].count > 0 && VisitDate) {
+          // Update outpatient record
+          await transaction.request()
+            .input('PatientID', sql.Int, id)
+            .input('VisitDate', sql.Date, VisitDate)
+            .input('ConsultationFee', sql.Decimal(10, 2), ConsultationFee || 0)
+            .query(`
+              UPDATE Outpatient
+              SET VisitDate = @VisitDate,
+                  ConsultationFee = @ConsultationFee
+              WHERE PatientID = @PatientID
+            `);
+        }
+      }
+
+      // Commit the transaction
+      await transaction.commit();
+
+      console.log(`Successfully updated patient ID: ${id}`);
+      res.json({ message: "Patient updated successfully" });
+    } catch (err) {
+      // Rollback in case of error
+      await transaction.rollback();
+      throw err;
+    }
   } catch (err) {
+    console.error(`Error updating patient ${id}:`, err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -93,15 +412,110 @@ app.delete("/patients/:id", async (req, res) => {
   }
 });
 
+// Enhanced Delete Patient Endpoint
 app.delete("/delete-patient/:id", async (req, res) => {
   const patientID = req.params.id;
+  
+  console.log(`Received delete request for patient ID: ${patientID}`);
+  
   try {
-    await sql.query(`DELETE FROM Patient WHERE PatientID = ${patientID}`);
-    res.json({ message: "Patient deleted successfully" });
+    // Check if patient has associated inpatient records
+    const inpatientCheck = await sql.query(`
+      SELECT COUNT(*) AS count FROM Inpatient WHERE PatientID = ${patientID}
+    `);
+    
+    const hasInpatientRecords = inpatientCheck.recordset[0].count > 0;
+    
+    // If patient has inpatient records, we need to handle them
+    if (hasInpatientRecords) {
+      console.log(`Patient ${patientID} has inpatient records that need handling`);
+      
+      // Get the room ID for potentially admitted patient
+      const roomResult = await sql.query(`
+        SELECT RoomID FROM Inpatient WHERE PatientID = ${patientID} AND DischargeDate IS NULL
+      `);
+      
+      // If patient is currently admitted, update the room status
+      if (roomResult.recordset.length > 0) {
+        const roomID = roomResult.recordset[0].RoomID;
+        console.log(`Patient ${patientID} is admitted to room ${roomID}. Updating room status...`);
+        
+        // Update room status to available
+        await sql.query(`
+          UPDATE Room SET Status = 'Available' WHERE RoomID = ${roomID}
+        `);
+      }
+      
+      // Create a stored procedure to handle the deletion with proper constraints
+      await sql.query(`
+        IF OBJECT_ID('DeletePatientWithDependencies', 'P') IS NOT NULL
+          DROP PROCEDURE DeletePatientWithDependencies;
+      `);
+      
+      await sql.query(`
+        CREATE PROCEDURE DeletePatientWithDependencies
+          @PatientID INT
+        AS
+        BEGIN
+          BEGIN TRY
+            BEGIN TRANSACTION
+              -- Delete related records first
+              DELETE FROM Inpatient WHERE PatientID = @PatientID;
+              DELETE FROM Outpatient WHERE PatientID = @PatientID;
+              DELETE FROM Appointment WHERE PatientID = @PatientID;
+              DELETE FROM Billing WHERE PatientID = @PatientID;
+              
+              -- Then delete the patient
+              DELETE FROM Patient WHERE PatientID = @PatientID;
+            COMMIT TRANSACTION
+          END TRY
+          BEGIN CATCH
+            ROLLBACK TRANSACTION
+            -- Return error info
+            SELECT 
+              ERROR_NUMBER() AS ErrorNumber,
+              ERROR_MESSAGE() AS ErrorMessage;
+          END CATCH
+        END
+      `);
+      
+      // Execute the stored procedure
+      const execResult = await sql.query(`
+        EXEC DeletePatientWithDependencies @PatientID = ${patientID};
+      `);
+      
+      // Check if there was an error
+      if (execResult.recordset && execResult.recordset.length > 0 && execResult.recordset[0].ErrorNumber) {
+        throw new Error(execResult.recordset[0].ErrorMessage);
+      }
+      
+      console.log(`Successfully deleted patient ID: ${patientID} using stored procedure`);
+      res.json({ message: "Patient deleted successfully" });
+    } else {
+      // No inpatient records, can directly delete
+      console.log(`Patient ${patientID} has no inpatient records, proceeding with direct deletion`);
+      
+      // Delete related records first
+      await sql.query(`DELETE FROM Outpatient WHERE PatientID = ${patientID}`);
+      await sql.query(`DELETE FROM Appointment WHERE PatientID = ${patientID}`);
+      await sql.query(`DELETE FROM Billing WHERE PatientID = ${patientID}`);
+      
+      // Delete the patient
+      const deleteResult = await sql.query(`DELETE FROM Patient WHERE PatientID = ${patientID}`);
+      
+      if (deleteResult.rowsAffected[0] === 0) {
+        return res.status(404).json({ error: "Patient not found or could not be deleted" });
+      }
+      
+      console.log(`Successfully deleted patient ID: ${patientID}`);
+      res.json({ message: "Patient deleted successfully" });
+    }
   } catch (err) {
+    console.error(`Error deleting patient ${patientID}:`, err);
     res.status(500).json({ error: err.message });
   }
 });
+
 // Room Allotment
 app.get("/rooms", async (req, res) => {
   try {
@@ -198,17 +612,22 @@ app.post("/discharge/:id", async (req, res) => {
   }
 });
 
+// Updated endpoint for occupied rooms - ensures DISTINCT rooms
 app.get("/bookedrooms", async (req, res) => {
   try {
-    const result = await sql.query(
-      `SELECT r.RoomID, r.RoomType, r.CostPerDay, r.Status, p.Name AS PatientName 
-       FROM Room r 
-       JOIN Inpatient i ON r.RoomID = i.RoomID
-       JOIN Patient p ON i.PatientID = p.PatientID
-       WHERE r.Status = 'Occupied'`
-    );
+    // Use DISTINCT to ensure no duplicate rooms
+    const result = await sql.query(`
+      SELECT DISTINCT r.RoomID, r.RoomType, r.CostPerDay, r.Status, 
+             r.FloorNumber, r.Capacity, p.PatientID, p.Name AS PatientName 
+      FROM Room r 
+      JOIN Inpatient i ON r.RoomID = i.RoomID
+      JOIN Patient p ON i.PatientID = p.PatientID
+      WHERE r.Status = 'Occupied' AND i.DischargeDate IS NULL
+      ORDER BY r.RoomID
+    `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("Error fetching booked rooms:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -543,6 +962,19 @@ app.delete("/billing/:id", async (req, res) => {
     });
   } catch (err) {
     console.error("Error deleting billing record:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/maintenance-rooms", async (req, res) => {
+  try {
+    const result = await sql.query(`
+      SELECT * FROM Room 
+      WHERE Status = 'Under Maintenance'
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("Error fetching maintenance rooms:", err);
     res.status(500).json({ error: err.message });
   }
 });

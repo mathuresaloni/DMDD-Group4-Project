@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import "./Dashboard.css";
 import PatientManagement from "./PatientManagement";
 import RoomManagement from "./RoomManagement";
@@ -8,6 +8,58 @@ import BillingManagement from "./BillingManagement";
 
 const Dashboard = () => {
   const [activeComponent, setActiveComponent] = useState("dashboard");
+  const [dashboardData, setDashboardData] = useState({
+    patients: 0,
+    rooms: 0,
+    appointments: 0,
+    pharmacy: 0
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [dbError, setDbError] = useState(false);
+
+  useEffect(() => {
+    // Function to fetch dashboard data from database
+    const fetchDashboardData = async () => {
+      setIsLoading(true);
+      try {
+        // Call the dashboard-stats endpoint
+        const response = await fetch('http://localhost:5001/api/dashboard-stats');
+        
+        if (!response.ok) {
+          throw new Error('Failed to connect to database');
+        }
+        
+        const data = await response.json();
+        
+        // Map the returned data to our state variables
+        setDashboardData({
+          patients: data.admittedPatients || 0,
+          rooms: data.availableRooms || 0,
+          appointments: data.todayAppointments || 0,
+          pharmacy: data.stockItems || 0
+        });
+        
+        setDbError(false);
+      } catch (error) {
+        console.error("Database connection error:", error);
+        setDbError(true);
+        // Set all values to 0 when database is not connected
+        setDashboardData({
+          patients: 0,
+          rooms: 0,
+          appointments: 0,
+          pharmacy: 0
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Only fetch data when on dashboard tab
+    if (activeComponent === "dashboard") {
+      fetchDashboardData();
+    }
+  }, [activeComponent]);
 
   const renderComponent = () => {
     switch (activeComponent) {
@@ -25,29 +77,36 @@ const Dashboard = () => {
         return (
           <div className="dashboard-overview">
             <h2>Hospital Management Dashboard</h2>
+            {isLoading ? (
+              <div className="loading-indicator">Loading dashboard data...</div>
+            ) : dbError ? (
+              <div className="error-message">
+                Database connection failed. Showing default values.
+              </div>
+            ) : null}
             <div className="dashboard-stats">
               <div className="stat-card">
                 <div className="stat-icon">👨‍⚕️</div>
                 <h3>Patients</h3>
-                <p className="stat-value">120</p>
+                <p className="stat-value">{dashboardData.patients}</p>
                 <p className="stat-label">Currently Admitted</p>
               </div>
               <div className="stat-card">
                 <div className="stat-icon">🛏️</div>
                 <h3>Rooms</h3>
-                <p className="stat-value">45</p>
+                <p className="stat-value">{dashboardData.rooms}</p>
                 <p className="stat-label">Available</p>
               </div>
               <div className="stat-card">
                 <div className="stat-icon">📅</div>
                 <h3>Appointments</h3>
-                <p className="stat-value">28</p>
+                <p className="stat-value">{dashboardData.appointments}</p>
                 <p className="stat-label">Today</p>
               </div>
               <div className="stat-card">
                 <div className="stat-icon">💊</div>
                 <h3>Pharmacy</h3>
-                <p className="stat-value">520</p>
+                <p className="stat-value">{dashboardData.pharmacy}</p>
                 <p className="stat-label">Items in Stock</p>
               </div>
             </div>

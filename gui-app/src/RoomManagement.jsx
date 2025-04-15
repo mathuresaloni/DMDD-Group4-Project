@@ -18,57 +18,91 @@ const RoomManagement = () => {
     AdmissionDate: new Date().toISOString().split("T")[0],
   });
 
-  useEffect(() => {
-    fetchRooms();
-    fetchPatients();
-    fetchDoctors();
-  }, []);
+  // Simple function to load all data
+  const loadAllData = () => {
+    setLoading(true);
+    Promise.all([
+      fetchAvailableRooms(),
+      fetchOccupiedRooms(),
+      fetchMaintenanceRooms(),
+      fetchPatients(),
+      fetchDoctors()
+    ])
+    .then(() => setLoading(false))
+    .catch(error => {
+      console.error("Error loading data:", error);
+      setLoading(false);
+    });
+  };
 
-  const fetchRooms = async () => {
+  // Fetch each type of room from separate endpoints
+  const fetchAvailableRooms = async () => {
     try {
-      setLoading(true);
-
-      // Fetch available rooms
-      const availableResponse = await axios.get("http://localhost:5001/rooms");
-      setAvailableRooms(availableResponse.data);
-
-      // Fetch occupied rooms
-      const occupiedResponse = await axios.get(
-        "http://localhost:5001/bookedrooms"
-      );
-      setOccupiedRooms(occupiedResponse.data);
-
-      // For maintenance rooms, we need to modify the API or add this endpoint
-      // This is just a placeholder - you'll need to implement the actual endpoint
-      try {
-        const maintenanceResponse = await axios.get(
-          "http://localhost:5001/maintenance-rooms"
-        );
-        setMaintenanceRooms(maintenanceResponse.data);
-      } catch (error) {
-        // If the endpoint doesn't exist yet, we'll use empty array for now
-        setMaintenanceRooms([]);
-      }
-
-      setLoading(false);
+      const response = await axios.get("http://localhost:5001/rooms");
+      setAvailableRooms(response.data);
+      return response.data;
     } catch (error) {
-      console.error("Error fetching rooms:", error);
-      setLoading(false);
+      console.error("Error fetching available rooms:", error);
+      setAvailableRooms([]);
+      return [];
+    }
+  };
+
+  const fetchOccupiedRooms = async () => {
+    try {
+      const response = await axios.get("http://localhost:5001/bookedrooms");
+      
+      // Create a Map to store unique rooms by RoomID
+      const uniqueRoomsMap = new Map();
+      
+      // Process each room to ensure uniqueness
+      response.data.forEach(room => {
+        // Only add the room if it's not already in our Map
+        if (!uniqueRoomsMap.has(room.RoomID)) {
+          uniqueRoomsMap.set(room.RoomID, room);
+        }
+      });
+      
+      // Convert Map back to array
+      const uniqueRooms = Array.from(uniqueRoomsMap.values());
+      
+      console.log("Unique occupied rooms:", uniqueRooms);
+      setOccupiedRooms(uniqueRooms);
+      return uniqueRooms;
+    } catch (error) {
+      console.error("Error fetching occupied rooms:", error);
+      setOccupiedRooms([]);
+      return [];
+    }
+  };
+
+  const fetchMaintenanceRooms = async () => {
+    try {
+      const response = await axios.get("http://localhost:5001/maintenance-rooms");
+      setMaintenanceRooms(response.data);
+      return response.data;
+    } catch (error) {
+      console.error("Error fetching maintenance rooms:", error);
+      setMaintenanceRooms([]);
+      return [];
     }
   };
 
   const fetchPatients = async () => {
     try {
       const response = await axios.get("http://localhost:5001/patients");
-      // Filter to get only outpatients without a room
+      // Only show patients who can be admitted (not already admitted inpatients)
       const eligiblePatients = response.data.filter(
         (patient) =>
-          patient.PatientType === "Outpatient" ||
-          (patient.PatientType === "Inpatient" && !patient.RoomID)
+          (patient.PatientType === "Inpatient" && !patient.RoomID) || 
+          patient.PatientType === "Outpatient"
       );
       setPatients(eligiblePatients);
+      return eligiblePatients;
     } catch (error) {
       console.error("Error fetching patients:", error);
+      setPatients([]);
+      return [];
     }
   };
 
@@ -76,10 +110,18 @@ const RoomManagement = () => {
     try {
       const response = await axios.get("http://localhost:5001/doctors");
       setDoctors(response.data);
+      return response.data;
     } catch (error) {
       console.error("Error fetching doctors:", error);
+      setDoctors([]);
+      return [];
     }
   };
+
+  useEffect(() => {
+    // Load all data when component mounts
+    loadAllData();
+  }, []);
 
   const handleAllotFormChange = (e) => {
     setAllotFormData({
@@ -90,45 +132,113 @@ const RoomManagement = () => {
 
   const handleAllotRoom = async (e) => {
     e.preventDefault();
+    setLoading(true);
+    
     try {
-      await axios.post("http://localhost:5001/admit", {
+      console.log("Allotment data:", allotFormData);
+      
+      // Get the patient data first to include in the request
+      const patientResponse = await axios.get(`http://localhost:5001/patients?id=${allotFormData.PatientID}`);
+      const patientData = patientResponse.data.find(p => p.PatientID === Number(allotFormData.PatientID));
+      
+      if (!patientData) {
+        throw new Error("Patient data not found");
+      }
+      
+      // Create admission data with all required fields
+      const admitData = {
+        // Pass existing patient ID
         PatientID: allotFormData.PatientID,
+        
+        // Include patient data
+        Name: patientData.Name,
+        PhoneNumber: patientData.PhoneNumber,
+        Gender: patientData.Gender,
+        Age: patientData.Age,
+        
+        // Required fields for admission
+        PatientType: "Inpatient",
         RoomID: allotFormData.RoomID,
         DoctorID: allotFormData.DoctorID,
-        AdmissionDate: allotFormData.AdmissionDate,
-      });
-
-      fetchRooms();
+        AdmissionDate: allotFormData.AdmissionDate
+      };
+      
+      console.log("Sending data to /admit:", admitData);
+      
+      const response = await axios.post("http://localhost:5001/admit", admitData);
+      console.log("Admit response:", response.data);
+  
+      // Close the form
       setShowAllotForm(false);
+      
+      // Reset form data
       setAllotFormData({
         PatientID: "",
         RoomID: "",
         DoctorID: "",
         AdmissionDate: new Date().toISOString().split("T")[0],
       });
+      
+      // Show success message if needed
+      alert("Room allocated successfully!");
+      
+      // Reload all data
+      loadAllData();
     } catch (error) {
       console.error("Error allotting room:", error);
+      alert(`Error allotting room: ${error.response?.data?.error || error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleDischargePatient = async (patientID) => {
+    if (!patientID) {
+      console.error("Error: No patient ID provided for discharge");
+      alert("Cannot discharge: Patient ID is missing");
+      return;
+    }
+    
+    setLoading(true);
+    
     try {
-      await axios.post(`http://localhost:5001/discharge/${patientID}`);
-      fetchRooms();
+      console.log("Discharging patient:", patientID);
+      
+      const response = await axios.post(`http://localhost:5001/discharge/${patientID}`);
+      console.log("Discharge response:", response.data);
+      
+      // Show success message
+      alert("Patient discharged successfully!");
+      
+      // Reload all data
+      loadAllData();
     } catch (error) {
       console.error("Error discharging patient:", error);
+      // Show error message with details
+      alert(`Error discharging patient: ${error.response?.data?.error || error.message}`);
+    } finally {
+      setLoading(false);
     }
   };
 
   const renderRoomCards = () => {
     let roomsToShow = [];
-
+    let statusClassName = "";
+    let statusLabel = "";
+    
+    // Determine which rooms to show based on selected tab
     if (selectedTab === "available") {
       roomsToShow = availableRooms;
+      statusClassName = "available";
+      statusLabel = "Available";
     } else if (selectedTab === "occupied") {
       roomsToShow = occupiedRooms;
+      statusClassName = "occupied";
+      statusLabel = "Occupied";
     } else {
       roomsToShow = maintenanceRooms;
+      statusClassName = "maintenance";
+      statusLabel = "Under Maintenance";
     }
 
     if (roomsToShow.length === 0) {
@@ -138,28 +248,20 @@ const RoomManagement = () => {
         </div>
       );
     }
+    
+    console.log(`Rendering ${selectedTab} rooms:`, roomsToShow);
 
     return (
       <div className="room-cards">
         {roomsToShow.map((room) => (
           <div
-            key={room.RoomID}
-            className={`room-card ${
-              selectedTab === "occupied"
-                ? "occupied"
-                : selectedTab === "maintenance"
-                ? "maintenance"
-                : ""
-            }`}
+            key={`${room.RoomID}-${Math.random()}`}
+            className={`room-card ${statusClassName}`}
           >
             <div className="room-header">
               <h3>Room {room.RoomID}</h3>
-              <span className={`room-status ${selectedTab}`}>
-                {selectedTab === "available"
-                  ? "Available"
-                  : selectedTab === "occupied"
-                  ? "Occupied"
-                  : "Maintenance"}
+              <span className={`room-status ${statusClassName}`}>
+                {statusLabel}
               </span>
             </div>
             <div className="room-details">
@@ -169,12 +271,16 @@ const RoomManagement = () => {
               <p>
                 <strong>Cost per Day:</strong> ${room.CostPerDay}
               </p>
-              <p>
-                <strong>Floor:</strong> {room.FloorNumber}
-              </p>
-              <p>
-                <strong>Capacity:</strong> {room.Capacity}
-              </p>
+              {room.FloorNumber && (
+                <p>
+                  <strong>Floor:</strong> {room.FloorNumber}
+                </p>
+              )}
+              {room.Capacity && (
+                <p>
+                  <strong>Capacity:</strong> {room.Capacity}
+                </p>
+              )}
 
               {selectedTab === "occupied" && (
                 <div className="patient-info">
