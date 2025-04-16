@@ -480,7 +480,7 @@ const BillingManagement = () => {
             <tr>
               <th>Bill #</th>
               <th>Patient</th>
-              <th>Date</th>
+
               <th>Total Amount</th>
               <th>Amount Paid</th>
               <th>Status</th>
@@ -492,7 +492,7 @@ const BillingManagement = () => {
               <tr key={bill.BillingID}>
                 <td>{bill.BillingID}</td>
                 <td>{getPatientName(bill.PatientID)}</td>
-                <td>{formatDate(bill.BillingDate)}</td>
+
                 <td>{formatCurrency(bill.TotalAmount || 0)}</td>
                 <td>{formatCurrency(bill.AmountPaid || 0)}</td>
                 <td>
