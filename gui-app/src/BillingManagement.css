@@ -250,6 +250,9 @@
 .print-btn {
   background-color: #f3e5f5;
   color: #7b1fa2;
+  border: 1px solid #ddd;
+  padding: 10px 20px;
+  border-radius: 5px;
 }
 
 .print-btn:hover {
@@ -805,7 +808,72 @@
   display: flex;
   justify-content: center;
   margin-top: 20px;
+  margin-bottom: 20px;
   gap: 15px;
+}
+.pay-btn {
+  background-color: #e8f5e9;
+  color: #4caf50;
+}
+
+.pay-btn:hover {
+  background-color: #c8e6c9;
+}
+
+.unpaid-btn {
+  background-color: #ffebee;
+  color: #f44336;
+}
+
+.unpaid-btn:hover {
+  background-color: #ffcdd2;
+}
+
+.partial-btn {
+  background-color: #fff8e1;
+  color: #ffa000;
+}
+
+.partial-btn:hover {
+  background-color: #ffecb3;
+}
+
+.status-dropdown-container {
+  position: relative;
+}
+
+.status-dropdown {
+  padding: 6px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background-color: white;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: var(--transition);
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 12px;
+  padding-right: 28px;
+  min-width: 110px;
+}
+
+.status-dropdown option[value="Paid"] {
+  background-color: #e8f5e9;
+  color: #4caf50;
+}
+
+.status-dropdown option[value="Partial"] {
+  background-color: #fff8e1;
+  color: #ffa000;
+}
+
+.status-dropdown option[value="Unpaid"] {
+  background-color: #ffebee;
+  color: #f44336;
 }
 
 /* Responsive adjustments */

@@ -14,6 +14,8 @@ const BillingManagement = () => {
   const [dateFilter, setDateFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedBill, setSelectedBill] = useState(null);
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
 
   // Form data for new bill
   const [billFormData, setBillFormData] = useState({
@@ -25,13 +27,58 @@ const BillingManagement = () => {
     paymentMethod: "cash",
     paymentStatus: "Paid",
     notes: "",
+    partialAmount: 0,
   });
+
+  // Patient room information for inpatients
+  const [inpatientRooms, setInpatientRooms] = useState([]);
 
   useEffect(() => {
     fetchBills();
     fetchPatients();
     fetchMedications();
+    fetchInpatientRooms();
   }, []);
+
+  const handleMarkAsPaid = async (billingID, totalAmount) => {
+    try {
+      await axios.put(`http://localhost:5001/billing/${billingID}`, {
+        Status: "Paid",
+        AmountPaid: totalAmount,
+      });
+
+      fetchBills();
+    } catch (error) {
+      console.error("Error marking bill as paid:", error);
+      alert("Failed to update bill. Please try again.");
+    }
+  };
+
+  const handleUpdateBillStatus = async (billingID, status, amount) => {
+    try {
+      await axios.put(`http://localhost:5001/billing/${billingID}`, {
+        Status: status,
+        AmountPaid: amount,
+      });
+
+      fetchBills();
+    } catch (error) {
+      console.error("Error updating bill status:", error);
+      alert("Failed to update bill status. Please try again.");
+    }
+  };
+
+  const handleDeleteBill = async (billingID) => {
+    if (window.confirm("Are you sure you want to delete this bill?")) {
+      try {
+        await axios.delete(`http://localhost:5001/billing/${billingID}`);
+        fetchBills();
+      } catch (error) {
+        console.error("Error deleting bill:", error);
+        alert("Failed to delete bill. Please try again.");
+      }
+    }
+  };
 
   const fetchBills = async () => {
     try {
@@ -65,11 +112,62 @@ const BillingManagement = () => {
     }
   };
 
+  const fetchInpatientRooms = async () => {
+    try {
+      const response = await axios.get("http://localhost:5001/inpatient-rooms");
+      setInpatientRooms(response.data);
+    } catch (error) {
+      console.error("Error fetching inpatient rooms:", error);
+      // This endpoint might not exist yet, so we'll handle the error gracefully
+      setInpatientRooms([]);
+    }
+  };
+
   const handleBillFormChange = (e) => {
     setBillFormData({
       ...billFormData,
       [e.target.name]: e.target.value,
     });
+
+    // If the patient selection changes, check if they're an inpatient and calculate room charges
+    if (e.target.name === "patientID" && e.target.value) {
+      const selectedPatient = patients.find(
+        (p) => p.PatientID.toString() === e.target.value
+      );
+
+      if (selectedPatient && selectedPatient.PatientType === "Inpatient") {
+        // Find this patient's room details
+        const patientRoom = inpatientRooms.find(
+          (room) => room.PatientID.toString() === e.target.value
+        );
+
+        if (patientRoom) {
+          // Calculate room charges for 3 days
+          const daysToCharge = 3;
+
+          // Calculate total room charges
+          const roomCharges = daysToCharge * patientRoom.CostPerDay;
+
+          // Update the form with calculated room charges
+          setBillFormData((prevState) => ({
+            ...prevState,
+            roomCharges: roomCharges,
+            // For inpatients, we might set a consultation fee as well
+            consultationFee: 100, // Example consultation fee
+          }));
+        }
+      } else if (
+        selectedPatient &&
+        selectedPatient.PatientType === "Outpatient"
+      ) {
+        // For outpatients, set room charges to 0 but maybe set a consultation fee
+        setBillFormData((prevState) => ({
+          ...prevState,
+          roomCharges: 0,
+          consultationFee: 75, // Example outpatient consultation fee
+        }));
+      }
+    }
   };
 
   const handleLineItemChange = (index, field, value) => {
@@ -128,19 +226,23 @@ const BillingManagement = () => {
     e.preventDefault();
 
     try {
-      // For now, just show the preview
-      // In a real app, you'd POST this to your backend
+      // Calculate the total amount
+      const totalAmount = calculateTotal();
+
+      // Show the preview
       setShowBillPreview(true);
 
-      // Mock response for demo purposes
-      // In reality, this should come from your API
-      const mockBillResponse = {
-        BillingID: Math.floor(Math.random() * 1000) + 1,
+      // Create the bill object to display
+      const newBill = {
         PatientID: billFormData.patientID,
         BillingDate: new Date().toISOString(),
-        TotalAmount: calculateTotal(),
+        TotalAmount: totalAmount,
         AmountPaid:
-          billFormData.paymentStatus === "Paid" ? calculateTotal() : 0,
+          billFormData.paymentStatus === "Paid"
+            ? totalAmount
+            : billFormData.paymentStatus === "Partial"
+            ? parseFloat(billFormData.partialAmount || 0)
+            : 0,
         Status: billFormData.paymentStatus,
         Items: billFormData.items.map((item) => ({
           Type: item.type,
@@ -149,29 +251,19 @@ const BillingManagement = () => {
           Price: item.price,
           Total: item.quantity * item.price,
         })),
-        ServiceCharges: parseFloat(billFormData.serviceCharges),
-        RoomCharges: parseFloat(billFormData.roomCharges),
-        ConsultationFee: parseFloat(billFormData.consultationFee),
+        ServiceCharges: parseFloat(billFormData.serviceCharges) || 0,
+        RoomCharges: parseFloat(billFormData.roomCharges) || 0,
+        ConsultationFee: parseFloat(billFormData.consultationFee) || 0,
         PaymentMethod: billFormData.paymentMethod,
         Notes: billFormData.notes,
+        // Flag to indicate this bill hasn't been saved to the database yet
+        isSaved: false,
       };
 
-      setSelectedBill(mockBillResponse);
+      setSelectedBill(newBill);
     } catch (error) {
       console.error("Error generating bill:", error);
       alert("Failed to generate bill. Please try again.");
-    }
-  };
-
-  const handleDeleteBill = async (billingID) => {
-    if (window.confirm("Are you sure you want to delete this bill?")) {
-      try {
-        await axios.delete(`http://localhost:5001/billing/${billingID}`);
-        fetchBills();
-      } catch (error) {
-        console.error("Error deleting bill:", error);
-        alert("Failed to delete bill. Please try again.");
-      }
     }
   };
 
@@ -232,17 +324,19 @@ const BillingManagement = () => {
     const searchMatch =
       searchTerm === "" ||
       patientName.includes(searchTerm.toLowerCase()) ||
-      bill.BillingID.toString().includes(searchTerm);
+      bill.BillingID?.toString().includes(searchTerm);
 
     // Check date match
     const dateMatch =
       dateFilter === "" ||
       (bill.BillingDate && bill.BillingDate.includes(dateFilter));
 
-    // Check status match
-    const statusMatch =
-      statusFilter === "all" ||
-      (bill.Status && bill.Status.toLowerCase() === statusFilter.toLowerCase());
+    // Check status match - ensure case insensitive matching
+    let statusMatch = true;
+    if (statusFilter !== "all") {
+      const billStatus = (bill.Status || "").toLowerCase();
+      statusMatch = billStatus === statusFilter.toLowerCase();
+    }
 
     return searchMatch && dateMatch && statusMatch;
   });
@@ -251,7 +345,7 @@ const BillingManagement = () => {
   // In a real app, these would be calculated from the actual billing data
   const totalBills = filteredBills.length;
   const totalRevenue = filteredBills.reduce(
-    (sum, bill) => sum + parseFloat(bill.TotalAmount || 0),
+    (sum, bill) => sum + parseFloat(bill.AmountPaid || 0),
     0
   );
   const paidBills = filteredBills.filter(
@@ -425,15 +519,35 @@ const BillingManagement = () => {
                     >
                       View
                     </button>
-                    <button
-                      className="edit-btn"
-                      onClick={() => {
-                        // Implement edit functionality
-                        alert("Edit functionality will be implemented soon");
-                      }}
-                    >
-                      Edit
-                    </button>
+
+                    {/* Status dropdown instead of multiple buttons */}
+                    <div className="status-dropdown-container">
+                      <select
+                        className="status-dropdown"
+                        value={bill.Status || "Unpaid"}
+                        onChange={(e) => {
+                          const newStatus = e.target.value;
+                          if (newStatus === "Paid") {
+                            handleMarkAsPaid(bill.BillingID, bill.TotalAmount);
+                          } else if (newStatus === "Unpaid") {
+                            handleUpdateBillStatus(bill.BillingID, "Unpaid", 0);
+                          } else if (newStatus === "Partial") {
+                            setSelectedBill(bill);
+                            setBillFormData({
+                              ...billFormData,
+                              paymentStatus: "Partial",
+                              partialAmount: Math.round(bill.TotalAmount / 2), // Default to half paid
+                            });
+                            setShowEditForm(true);
+                          }
+                        }}
+                      >
+                        <option value="Paid">Paid</option>
+                        <option value="Partial">Partial</option>
+                        <option value="Unpaid">Unpaid</option>
+                      </select>
+                    </div>
+
                     <button
                       className="delete-btn"
                       onClick={() => handleDeleteBill(bill.BillingID)}
@@ -445,7 +559,6 @@ const BillingManagement = () => {
                       onClick={() => {
                         setSelectedBill(bill);
                         setShowBillPreview(true);
-                        // In a real app, you might trigger printing logic here
                       }}
                     >
                       Print
@@ -686,6 +799,16 @@ const BillingManagement = () => {
                     name="roomCharges"
                     value={billFormData.roomCharges}
                     onChange={handleBillFormChange}
+                    readOnly={
+                      selectedPatient &&
+                      selectedPatient.PatientType === "Inpatient"
+                    }
+                    title={
+                      selectedPatient &&
+                      selectedPatient.PatientType === "Inpatient"
+                        ? "Room charges are calculated automatically for inpatients"
+                        : ""
+                    }
                   />
                 </div>
                 <div>
@@ -1004,6 +1127,52 @@ const BillingManagement = () => {
             >
               Close
             </button>
+            {showGenerateBill && !selectedBill.isSaved && (
+              <button
+                className="submit-btn"
+                onClick={async () => {
+                  try {
+                    // Add the bill to the database
+                    const response = await axios.post(
+                      "http://localhost:5001/billing",
+                      {
+                        PatientID: selectedBill.PatientID,
+                        PaymentMethodID: 1, // Default to first payment method, adjust as needed
+                        ServiceCharges: selectedBill.ServiceCharges || 0,
+                        MedicationCharges:
+                          selectedBill.Items?.reduce(
+                            (sum, item) => sum + item.Total,
+                            0
+                          ) || 0,
+                        RoomCharges: selectedBill.RoomCharges || 0,
+                        ConsultationFee: selectedBill.ConsultationFee || 0,
+                        TotalAmount: selectedBill.TotalAmount || 0,
+                        AmountPaid: selectedBill.AmountPaid || 0,
+                        Status: selectedBill.Status || "Unpaid",
+                      }
+                    );
+
+                    // Update the selected bill with the saved ID and flag
+                    setSelectedBill({
+                      ...selectedBill,
+                      BillingID: response.data.billingID,
+                      isSaved: true,
+                    });
+
+                    // Show success message
+                    alert("Bill saved successfully!");
+
+                    // Refresh the bills list
+                    fetchBills();
+                  } catch (error) {
+                    console.error("Error saving bill:", error);
+                    alert("Failed to save bill. Please try again.");
+                  }
+                }}
+              >
+                Save Bill
+              </button>
+            )}
             <button
               className="print-btn"
               onClick={() => {
